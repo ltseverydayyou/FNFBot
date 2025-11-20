@@ -12,9 +12,6 @@ namespace FNFBot20
     {
         public FNFSong song { get; set; }
 
-        private static readonly Dictionary<string, bool> noteTypeDecisions =
-            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-
         public MapBot(string songDir)
         {
             string fixedPath = FixChart(songDir);
@@ -42,6 +39,8 @@ namespace FNFBot20
             {
                 return path;
             }
+
+            var noteTypeDecisions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
             JObject songObj = root["song"] as JObject;
             if (songObj != null)

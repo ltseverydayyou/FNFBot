@@ -77,6 +77,30 @@ namespace FNFBot20
                 txtbxDir.Text = "FNF Game Directory (ex: C:/Users/user/Documents/FNF)";
         }
 
+        private void AddSongsFromRoot(string root)
+        {
+            if (!Directory.Exists(root))
+                return;
+
+            foreach (string s in Directory.GetDirectories(root))
+            {
+                var children = Directory
+                    .GetFiles(s, "*.json")
+                    .Select(child => new TreeNode(LeadingPath(child)) { Tag = child })
+                    .ToArray();
+
+                if (children.Length == 0)
+                    continue;
+
+                var parentNode = new TreeNode(LeadingPath(s), children)
+                {
+                    Tag = s
+                };
+
+                treSngSelect.Nodes.Add(parentNode);
+            }
+        }
+
         private void button2_Click(object sender, EventArgs e)
         {
             if (!Directory.Exists(txtbxDir.Text))
@@ -86,18 +110,30 @@ namespace FNFBot20
             }
             
             Form1.WriteToConsole("Directory found! Retrieving data...");
-
+            treSngSelect.Nodes.Clear();
 
             try
             {
-                foreach (string s in Directory.GetDirectories($@"{txtbxDir.Text}\assets\data"))
+                var gameDir = txtbxDir.Text;
+
+                var assetsData = Path.Combine(gameDir, "assets", "data");
+                AddSongsFromRoot(assetsData);
+
+                var modsDir = Path.Combine(gameDir, "mods");
+                if (Directory.Exists(modsDir))
                 {
-                    // linq magic
-                    // in simple terms, convert a list of files into a TreeNode[],
-                    // then make a new TreeNode with the children of the one we made
-                    var children = Directory.GetFiles(s).Select(child => new TreeNode(LeadingPath(child)));
-                    treSngSelect.Nodes.Add(new TreeNode(LeadingPath(s), children.ToArray()));
+                    var modsDataDirect = Path.Combine(modsDir, "data");
+                    AddSongsFromRoot(modsDataDirect);
+
+                    foreach (var modFolder in Directory.GetDirectories(modsDir))
+                    {
+                        var modData = Path.Combine(modFolder, "data");
+                        AddSongsFromRoot(modData);
+                    }
                 }
+
+                if (treSngSelect.Nodes.Count == 0)
+                    WriteToConsole("No songs found in assets or mods.");
             }
             catch (Exception ee)
             {
@@ -111,14 +147,23 @@ namespace FNFBot20
         {
             try
             {
-                WriteToConsole("Selecting " + treSngSelect.SelectedNode.Text);
+                var node = e.Node;
+                if (node.Nodes.Count > 0)
+                    return;
 
-                bot.Load(txtbxDir.Text +
-                         $@"\assets\data\{treSngSelect.SelectedNode.Parent?.Text}\{treSngSelect.SelectedNode.Text}");
+                var fullPath = node.Tag as string;
+                if (string.IsNullOrEmpty(fullPath))
+                {
+                    WriteToConsole("Failed to select map: no path stored.");
+                    return;
+                }
+
+                WriteToConsole("Selecting " + node.Text);
+                bot.Load(fullPath);
             }
             catch (Exception ee)
             {
-                WriteToConsole("Failed to select map.\n" + e);
+                WriteToConsole("Failed to select map.\n" + ee);
             }
         }
 
