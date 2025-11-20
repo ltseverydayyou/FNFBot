@@ -9,6 +9,14 @@ namespace FNFBot20
 {
     public class KeyBot
     {
+        public enum BindTarget
+        {
+            None,
+            Play,
+            OffsetUp,
+            OffsetDown
+        }
+
         public LowLevelKeyboardHook kHook { get; set; }
 
         public int offset = 25;
@@ -18,6 +26,10 @@ namespace FNFBot20
         public Keys OffsetDownKey = Keys.F3;
 
         private const string KeybindFile = "keybinds.settings";
+
+        public BindTarget CurrentBindTarget = BindTarget.None;
+
+        public int DefaultOffset { get; private set; }
 
         public KeyBot()
         {
@@ -29,11 +41,12 @@ namespace FNFBot20
                 else
                     offset = Convert.ToInt32(File.ReadAllText("bot.settings"));
             }
-            catch (Exception)
+            catch
             {
                 Form1.WriteToConsole("Failed to load config....");
             }
 
+            DefaultOffset = offset;
             LoadKeybinds();
         }
 
@@ -70,7 +83,7 @@ namespace FNFBot20
             }
         }
 
-        private void SaveKeybinds()
+        public void SaveKeybinds()
         {
             var lines = new[]
             {
@@ -81,10 +94,55 @@ namespace FNFBot20
             File.WriteAllLines(KeybindFile, lines);
         }
 
+        public void BeginBind(BindTarget target)
+        {
+            CurrentBindTarget = target;
+            Form1.WriteToConsole("Press a key to bind " + target + ".");
+        }
+
+        public void ResetOffset()
+        {
+            offset = DefaultOffset;
+            try
+            {
+                File.WriteAllText("bot.settings", offset.ToString());
+            }
+            catch
+            {
+            }
+
+            if (Form1.offset != null)
+                Form1.offset.Text = "Offset: " + offset;
+            Form1.WriteToConsole("Offset reset to " + offset + ".");
+        }
+
         public void InitHooks()
         {
             kHook.OnKeyPressed += (sender, keys) =>
             {
+                if (CurrentBindTarget != BindTarget.None)
+                {
+                    switch (CurrentBindTarget)
+                    {
+                        case BindTarget.Play:
+                            PlayKey = keys;
+                            break;
+                        case BindTarget.OffsetUp:
+                            OffsetUpKey = keys;
+                            break;
+                        case BindTarget.OffsetDown:
+                            OffsetDownKey = keys;
+                            break;
+                    }
+
+                    SaveKeybinds();
+                    CurrentBindTarget = BindTarget.None;
+                    if (Form1.Instance != null)
+                        Form1.Instance.UpdateKeybindLabels();
+                    Form1.WriteToConsole("Bound " + keys + ".");
+                    return;
+                }
+
                 if (keys == PlayKey)
                 {
                     Bot.Playing = !Bot.Playing;

@@ -1,14 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace FNFBot20
@@ -30,6 +27,14 @@ namespace FNFBot20
         public static bool LightShow = false;
 
         public static int SectionSee = 1;
+
+        public static bool DebugEnabled = false;
+
+        public static Form1 Instance;
+
+        public static Label PlayKeyLabel;
+        public static Label OffsetUpKeyLabel;
+        public static Label OffsetDownKeyLabel;
         
         public const int WM_NCLBUTTONDOWN = 0xA1;
         public const int HT_CAPTION = 0x2;
@@ -41,6 +46,7 @@ namespace FNFBot20
         public Form1()
         {
             InitializeComponent();
+            Instance = this;
             CheckForIllegalCrossThreadCalls = false;
             bot = new Bot();
             console = rchConsole;
@@ -48,8 +54,13 @@ namespace FNFBot20
             watchTime = label1;
             pnlField = pnlPlayField;
             checkBox1.Checked = true;
+            chkDebug.Checked = false;
+            PlayKeyLabel = lblPlayKey;
+            OffsetUpKeyLabel = lblOffsetUpKey;
+            OffsetDownKeyLabel = lblOffsetDownKey;
+            UpdateKeybindLabels();
+            button1.Visible = false;
         }
-
 
         public static void WriteToConsole(string text)
         {
@@ -58,12 +69,7 @@ namespace FNFBot20
         
         private void button1_Click(object sender, EventArgs e)
         {
-            foreach(Thread t in currentThreads)
-                t.Abort();
-            bot.kBot.StopHooks();
-            Environment.Exit(0);
         }
-
 
         private void txtbxDir_Enter(object sender, EventArgs e)
         {
@@ -103,24 +109,76 @@ namespace FNFBot20
 
         private void button2_Click(object sender, EventArgs e)
         {
-            if (!Directory.Exists(txtbxDir.Text))
+            var inputPath = txtbxDir.Text;
+            if (!Directory.Exists(inputPath))
             {
-                Form1.WriteToConsole("Directory does not exist");
+                WriteToConsole("Directory does not exist");
                 return;
             }
             
-            Form1.WriteToConsole("Directory found! Retrieving data...");
+            WriteToConsole("Directory found! Retrieving data...");
             treSngSelect.Nodes.Clear();
 
             try
             {
-                var gameDir = txtbxDir.Text;
+                string gameDir = inputPath;
+                string assetsData = null;
+                string modsDir = null;
 
-                var assetsData = Path.Combine(gameDir, "assets", "data");
-                AddSongsFromRoot(assetsData);
+                string last = Path.GetFileName(gameDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
-                var modsDir = Path.Combine(gameDir, "mods");
-                if (Directory.Exists(modsDir))
+                if (Directory.Exists(Path.Combine(gameDir, "assets", "data")) || Directory.Exists(Path.Combine(gameDir, "mods")))
+                {
+                    assetsData = Path.Combine(gameDir, "assets", "data");
+                    modsDir = Path.Combine(gameDir, "mods");
+                }
+                else if (string.Equals(last, "assets", StringComparison.OrdinalIgnoreCase))
+                {
+                    assetsData = Path.Combine(gameDir, "data");
+                    var parent = Directory.GetParent(gameDir);
+                    if (parent != null)
+                        modsDir = Path.Combine(parent.FullName, "mods");
+                }
+                else if (string.Equals(last, "mods", StringComparison.OrdinalIgnoreCase))
+                {
+                    modsDir = gameDir;
+                    var parent = Directory.GetParent(gameDir);
+                    if (parent != null)
+                        assetsData = Path.Combine(parent.FullName, "assets", "data");
+                }
+                else if (string.Equals(last, "data", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parent = Directory.GetParent(gameDir);
+                    if (parent != null)
+                    {
+                        var parentName = parent.Name;
+                        var grand = Directory.GetParent(parent.FullName);
+                        if (grand != null && string.Equals(parentName, "assets", StringComparison.OrdinalIgnoreCase))
+                        {
+                            assetsData = gameDir;
+                            modsDir = Path.Combine(grand.FullName, "mods");
+                        }
+                        else
+                        {
+                            var modsParent = Directory.GetParent(parent.FullName);
+                            if (modsParent != null && string.Equals(modsParent.Name, "mods", StringComparison.OrdinalIgnoreCase))
+                            {
+                                modsDir = modsParent.FullName;
+                                assetsData = Path.Combine(modsParent.Parent?.FullName ?? "", "assets", "data");
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    assetsData = Path.Combine(gameDir, "data");
+                    modsDir = Path.Combine(gameDir, "mods");
+                }
+
+                if (!string.IsNullOrEmpty(assetsData))
+                    AddSongsFromRoot(assetsData);
+
+                if (!string.IsNullOrEmpty(modsDir) && Directory.Exists(modsDir))
                 {
                     var modsDataDirect = Path.Combine(modsDir, "data");
                     AddSongsFromRoot(modsDataDirect);
@@ -140,8 +198,28 @@ namespace FNFBot20
                 WriteToConsole("Failed to retrieve data.\n" + ee);
             }
         }
+
+        private void btnManual_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new OpenFileDialog())
+            {
+                dlg.Filter = "FNF Charts (*.json)|*.json|All files (*.*)|*.*";
+                if (Directory.Exists(txtbxDir.Text))
+                    dlg.InitialDirectory = txtbxDir.Text;
+
+                dlg.Title = "Select a chart (.json)";
+
+                if (dlg.ShowDialog() == DialogResult.OK)
+                {
+                    var path = dlg.FileName;
+                    txtbxDir.Text = Path.GetDirectoryName(path);
+                    WriteToConsole("Manual chart selected: " + path);
+                    bot.Load(path);
+                }
+            }
+        }
         
-        private string LeadingPath(string path) => path.Split('\\').Last();
+        private string LeadingPath(string path) => path.Split('\\', '/').Last();
         
         private void treSngSelect_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
@@ -197,5 +275,61 @@ namespace FNFBot20
             pnlField.Controls.Clear();
         }
 
+        private void chkDebug_CheckedChanged(object sender, EventArgs e)
+        {
+            DebugEnabled = chkDebug.Checked;
+            WriteToConsole("Debugging: " + DebugEnabled);
+        }
+
+        public void UpdateKeybindLabels()
+        {
+            if (bot == null || bot.kBot == null)
+                return;
+
+            if (PlayKeyLabel != null)
+                PlayKeyLabel.Text = "Play: " + bot.kBot.PlayKey;
+            if (OffsetUpKeyLabel != null)
+                OffsetUpKeyLabel.Text = "Offset+: " + bot.kBot.OffsetUpKey;
+            if (OffsetDownKeyLabel != null)
+                OffsetDownKeyLabel.Text = "Offset-: " + bot.kBot.OffsetDownKey;
+        }
+
+        private void btnBindPlay_Click(object sender, EventArgs e)
+        {
+            if (bot == null || bot.kBot == null)
+                return;
+
+            bot.kBot.BeginBind(KeyBot.BindTarget.Play);
+            if (PlayKeyLabel != null)
+                PlayKeyLabel.Text = "Play: [press key]";
+        }
+
+        private void btnBindOffsetUp_Click(object sender, EventArgs e)
+        {
+            if (bot == null || bot.kBot == null)
+                return;
+
+            bot.kBot.BeginBind(KeyBot.BindTarget.OffsetUp);
+            if (OffsetUpKeyLabel != null)
+                OffsetUpKeyLabel.Text = "Offset+: [press key]";
+        }
+
+        private void btnBindOffsetDown_Click(object sender, EventArgs e)
+        {
+            if (bot == null || bot.kBot == null)
+                return;
+
+            bot.kBot.BeginBind(KeyBot.BindTarget.OffsetDown);
+            if (OffsetDownKeyLabel != null)
+                OffsetDownKeyLabel.Text = "Offset-: [press key]";
+        }
+
+        private void btnResetOffset_Click(object sender, EventArgs e)
+        {
+            if (bot == null || bot.kBot == null)
+                return;
+
+            bot.kBot.ResetOffset();
+        }
     }
 }

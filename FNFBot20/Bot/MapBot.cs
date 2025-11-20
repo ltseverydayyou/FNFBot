@@ -63,10 +63,21 @@ namespace FNFBot20
                             JArray arr = noteToken as JArray;
                             if (arr == null || arr.Count == 0) continue;
 
-                            if (arr.Count > 3 && arr[3].Type == JTokenType.String)
+                            string typeName = null;
+                            if (arr.Count > 3)
                             {
-                                string typeName = arr[3].ToString();
+                                for (int i = 3; i < arr.Count; i++)
+                                {
+                                    if (arr[i].Type == JTokenType.String)
+                                    {
+                                        typeName = arr[i].ToString();
+                                        break;
+                                    }
+                                }
+                            }
 
+                            if (!string.IsNullOrEmpty(typeName))
+                            {
                                 bool hitThisType;
                                 if (!noteTypeDecisions.TryGetValue(typeName, out hitThisType))
                                 {
