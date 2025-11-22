@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -17,32 +16,27 @@ namespace FNFBot20
 
         public static RichTextBox console { get; set; }
         public static Label watchTime { get; set; }
-        
         public static Label offset { get; set; }
-        
         public static Panel pnlField { get; set; }
 
         public static bool Rendering = true;
-
         public static bool LightShow = false;
-
         public static int SectionSee = 1;
-
-        public static bool DebugEnabled = false;
 
         public static Form1 Instance;
 
         public static Label PlayKeyLabel;
         public static Label OffsetUpKeyLabel;
         public static Label OffsetDownKeyLabel;
-        
+
         public const int WM_NCLBUTTONDOWN = 0xA1;
         public const int HT_CAPTION = 0x2;
+
         [DllImport("user32.dll")]
         public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
-        [DllImportAttribute("user32.dll")]
+        [DllImport("user32.dll")]
         public static extern bool ReleaseCapture();
-        
+
         public Form1()
         {
             InitializeComponent();
@@ -54,36 +48,36 @@ namespace FNFBot20
             watchTime = label1;
             pnlField = pnlPlayField;
             checkBox1.Checked = true;
-            chkDebug.Checked = false;
             PlayKeyLabel = lblPlayKey;
             OffsetUpKeyLabel = lblOffsetUpKey;
             OffsetDownKeyLabel = lblOffsetDownKey;
             UpdateKeybindLabels();
             button1.Visible = false;
+            Form1_Resize(this, EventArgs.Empty);
         }
 
         public static void WriteToConsole(string text)
         {
             console.Text += "[" + DateTime.Now.ToShortTimeString() + "] " + text + "\n";
         }
-        
-        private void button1_Click(object sender, EventArgs e)
+
+        void button1_Click(object sender, EventArgs e)
         {
         }
 
-        private void txtbxDir_Enter(object sender, EventArgs e)
+        void txtbxDir_Enter(object sender, EventArgs e)
         {
             if (txtbxDir.Text == "FNF Game Directory (ex: C:/Users/user/Documents/FNF)")
                 txtbxDir.Text = "";
         }
 
-        private void txtbxDir_Leave(object sender, EventArgs e)
+        void txtbxDir_Leave(object sender, EventArgs e)
         {
             if (txtbxDir.Text == "")
                 txtbxDir.Text = "FNF Game Directory (ex: C:/Users/user/Documents/FNF)";
         }
 
-        private void AddSongsFromRoot(string root)
+        void AddSongsFromRoot(string root)
         {
             if (!Directory.Exists(root))
                 return;
@@ -107,7 +101,7 @@ namespace FNFBot20
             }
         }
 
-        private void button2_Click(object sender, EventArgs e)
+        void button2_Click(object sender, EventArgs e)
         {
             var inputPath = txtbxDir.Text;
             if (!Directory.Exists(inputPath))
@@ -115,7 +109,7 @@ namespace FNFBot20
                 WriteToConsole("Directory does not exist");
                 return;
             }
-            
+
             WriteToConsole("Directory found! Retrieving data...");
             treSngSelect.Nodes.Clear();
 
@@ -199,7 +193,7 @@ namespace FNFBot20
             }
         }
 
-        private void btnManual_Click(object sender, EventArgs e)
+        void btnManual_Click(object sender, EventArgs e)
         {
             using (var dlg = new OpenFileDialog())
             {
@@ -218,10 +212,10 @@ namespace FNFBot20
                 }
             }
         }
-        
-        private string LeadingPath(string path) => path.Split('\\', '/').Last();
-        
-        private void treSngSelect_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+
+        string LeadingPath(string path) => path.Split('\\', '/').Last();
+
+        void treSngSelect_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
             try
             {
@@ -245,40 +239,34 @@ namespace FNFBot20
             }
         }
 
-        private void pnlTop_MouseDown(object sender, MouseEventArgs e)
+        void pnlTop_MouseDown(object sender, MouseEventArgs e)
         {
             ReleaseCapture();
-            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); 
+            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
         }
 
-        private void lblVer_MouseDown(object sender, MouseEventArgs e)
-        {
-             ReleaseCapture();
-             SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); 
-        }
-
-        private void pnlLogo_MouseDown(object sender, MouseEventArgs e)
+        void lblVer_MouseDown(object sender, MouseEventArgs e)
         {
             ReleaseCapture();
-            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); 
+            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
         }
 
-        private void label1_MouseDown(object sender, MouseEventArgs e)
+        void pnlLogo_MouseDown(object sender, MouseEventArgs e)
         {
             ReleaseCapture();
-            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0); 
+            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
         }
 
-        private void checkBox1_CheckedChanged(object sender, EventArgs e)
+        void label1_MouseDown(object sender, MouseEventArgs e)
+        {
+            ReleaseCapture();
+            SendMessage(this.Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
+        }
+
+        void checkBox1_CheckedChanged(object sender, EventArgs e)
         {
             Rendering = checkBox1.Checked;
             pnlField.Controls.Clear();
-        }
-
-        private void chkDebug_CheckedChanged(object sender, EventArgs e)
-        {
-            DebugEnabled = chkDebug.Checked;
-            WriteToConsole("Debugging: " + DebugEnabled);
         }
 
         public void UpdateKeybindLabels()
@@ -294,7 +282,7 @@ namespace FNFBot20
                 OffsetDownKeyLabel.Text = "Offset-: " + bot.kBot.OffsetDownKey;
         }
 
-        private void btnBindPlay_Click(object sender, EventArgs e)
+        void btnBindPlay_Click(object sender, EventArgs e)
         {
             if (bot == null || bot.kBot == null)
                 return;
@@ -304,7 +292,7 @@ namespace FNFBot20
                 PlayKeyLabel.Text = "Play: [press key]";
         }
 
-        private void btnBindOffsetUp_Click(object sender, EventArgs e)
+        void btnBindOffsetUp_Click(object sender, EventArgs e)
         {
             if (bot == null || bot.kBot == null)
                 return;
@@ -314,7 +302,7 @@ namespace FNFBot20
                 OffsetUpKeyLabel.Text = "Offset+: [press key]";
         }
 
-        private void btnBindOffsetDown_Click(object sender, EventArgs e)
+        void btnBindOffsetDown_Click(object sender, EventArgs e)
         {
             if (bot == null || bot.kBot == null)
                 return;
@@ -324,12 +312,39 @@ namespace FNFBot20
                 OffsetDownKeyLabel.Text = "Offset-: [press key]";
         }
 
-        private void btnResetOffset_Click(object sender, EventArgs e)
+        void btnResetOffset_Click(object sender, EventArgs e)
         {
             if (bot == null || bot.kBot == null)
                 return;
 
             bot.kBot.ResetOffset();
+        }
+
+        void Form1_Resize(object sender, EventArgs e)
+        {
+            int margin = 3;
+
+            int rowY = txtbxDir.Top;
+            int rowH = txtbxDir.Height;
+
+            int right = this.ClientSize.Width - margin;
+
+            btnManual.Top = rowY;
+            btnManual.Height = rowH;
+            btnManual.Left = right - btnManual.Width;
+
+            button2.Top = rowY;
+            button2.Height = rowH;
+            button2.Left = btnManual.Left - margin - button2.Width;
+
+            txtbxDir.Top = rowY;
+            txtbxDir.Left = margin;
+            txtbxDir.Width = button2.Left - margin - txtbxDir.Left;
+        }
+
+        private void lblVer_Click(object sender, EventArgs e)
+        {
+
         }
     }
 }

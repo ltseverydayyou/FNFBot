@@ -25,7 +25,7 @@ namespace FNFBot20
         public Keys OffsetUpKey = Keys.F2;
         public Keys OffsetDownKey = Keys.F3;
 
-        private const string KeybindFile = "keybinds.settings";
+        const string KeybindFile = "keybinds.settings";
 
         public BindTarget CurrentBindTarget = BindTarget.None;
 
@@ -148,6 +148,12 @@ namespace FNFBot20
 
                 if (keys == PlayKey)
                 {
+                    if (!Bot.SongLoaded)
+                    {
+                        Form1.WriteToConsole("Please Select A Song First");
+                        return;
+                    }
+
                     Bot.Playing = !Bot.Playing;
                     Form1.WriteToConsole("Playing: " + Bot.Playing);
                 }
