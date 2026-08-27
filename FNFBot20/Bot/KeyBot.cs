@@ -186,14 +186,14 @@ namespace FNFBot20
 
                 if (keys == PlayKey)
                 {
-                    if (!Bot.SongLoaded)
+                    if (!Bot.SongLoaded || Form1.Instance == null || Form1.Instance.bot == null)
                     {
                         Form1.WriteToConsole("Please Select A Song First");
                         return;
                     }
 
-                    Bot.Playing = !Bot.Playing;
-                    Form1.WriteToConsole("Playing: " + Bot.Playing);
+                    bool playing = Form1.Instance.bot.TogglePlayback();
+                    Form1.WriteToConsole("Playing: " + playing);
                 }
                 else if (keys == OffsetUpKey)
                 {

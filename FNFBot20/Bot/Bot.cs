@@ -28,6 +28,8 @@ namespace FNFBot20
         private readonly Dictionary<VirtualKeyCode, int> heldKeys = new Dictionary<VirtualKeyCode, int>();
         private volatile bool shutdownRequested;
         private int playbackGeneration;
+        private int playbackRunGeneration;
+        private readonly AutoResetEvent playbackStartSignal = new AutoResetEvent(false);
         private readonly List<ScheduledInputEvent> inputSchedule = new List<ScheduledInputEvent>();
         private bool highDensityChart;
         private int peakNotesPerSecond;
@@ -300,7 +302,9 @@ namespace FNFBot20
         private void StopPlaybackWorkers()
         {
             Playing = false;
+            Interlocked.Increment(ref playbackRunGeneration);
             Interlocked.Increment(ref playbackGeneration);
+            playbackStartSignal.Set();
 
             if (watch != null)
             {
@@ -316,6 +320,44 @@ namespace FNFBot20
             ReleaseAllKeys();
             InterruptWorkers();
             ReleaseAllKeys();
+        }
+
+        public bool TogglePlayback()
+        {
+            if (!SongLoaded || watch == null)
+                return false;
+
+            if (Playing)
+            {
+                Playing = false;
+                Interlocked.Increment(ref playbackRunGeneration);
+                ReleaseAllKeys();
+
+                try
+                {
+                    watch.Reset();
+                }
+                catch
+                {
+                }
+
+                if (Form1.watchTime != null)
+                    Form1.watchTime.Text = "Time: 00:00:000";
+
+                return false;
+            }
+
+            Interlocked.Increment(ref playbackRunGeneration);
+            ReleaseAllKeys();
+            watch.Reset();
+            watch.Start();
+            Playing = true;
+
+            if (Form1.watchTime != null)
+                Form1.watchTime.Text = "Time: 00:00:000";
+
+            playbackStartSignal.Set();
+            return true;
         }
 
         private int BuildInputSchedule()
@@ -515,9 +557,11 @@ namespace FNFBot20
                 Form1.watchTime.Text = "Time: 00:00:000";
         }
 
-        private bool PrecisionWaitUntil(double targetMilliseconds, int generation, ref double lastUiUpdate)
+        private bool PrecisionWaitUntil(double targetMilliseconds, int generation, int runGeneration, ref double lastUiUpdate)
         {
-            while (IsSessionCurrent(generation) && Playing)
+            while (IsSessionCurrent(generation) &&
+                   Playing &&
+                   runGeneration == Volatile.Read(ref playbackRunGeneration))
             {
                 double elapsed = watch.Elapsed.TotalMilliseconds;
                 double remaining = targetMilliseconds - elapsed;
@@ -533,8 +577,7 @@ namespace FNFBot20
 
                 if (remaining > 8.0)
                 {
-                    int sleepMs = Math.Max(1, (int)Math.Floor(remaining - 3.0));
-                    Thread.Sleep(sleepMs);
+                    Thread.Sleep(2);
                 }
                 else if (remaining > 2.0)
                 {
@@ -553,11 +596,13 @@ namespace FNFBot20
             return false;
         }
 
-        private void RenderPlayback(int generation)
+        private void RenderPlayback(int generation, int runGeneration)
         {
             foreach (FNFSong.FNFSection section in mBot.song.Sections)
             {
-                if (!IsSessionCurrent(generation) || !Playing)
+                if (!IsSessionCurrent(generation) ||
+                    !Playing ||
+                    runGeneration != Volatile.Read(ref playbackRunGeneration))
                     return;
 
                 List<FNFSong.FNFNote> notes = mBot.GetHitNotes(section, Side == PlaybackSide.Opponent);
@@ -565,10 +610,15 @@ namespace FNFBot20
                     continue;
 
                 double target = (double)notes.Min(n => n.Time) - kBot.offset;
-                while (IsSessionCurrent(generation) && Playing && watch.Elapsed.TotalMilliseconds < target)
-                    Thread.Sleep(5);
+                while (IsSessionCurrent(generation) &&
+                       Playing &&
+                       runGeneration == Volatile.Read(ref playbackRunGeneration) &&
+                       watch.Elapsed.TotalMilliseconds < target)
+                    Thread.Sleep(2);
 
-                if (!IsSessionCurrent(generation) || !Playing)
+                if (!IsSessionCurrent(generation) ||
+                    !Playing ||
+                    runGeneration != Volatile.Read(ref playbackRunGeneration))
                     return;
 
                 rBot.ListNotes(notes);
@@ -581,21 +631,19 @@ namespace FNFBot20
 
             while (IsSessionCurrent(generation))
             {
+                playbackStartSignal.WaitOne();
+
+                if (!IsSessionCurrent(generation))
+                    break;
+
                 if (!Playing)
-                {
-                    Thread.Sleep(25);
                     continue;
-                }
 
+                int runGeneration = Volatile.Read(ref playbackRunGeneration);
                 ReleaseAllKeys();
-                watch.Reset();
-                watch.Start();
-
-                if (Form1.watchTime != null)
-                    Form1.watchTime.Text = "Time: 00:00:000";
 
                 if (Form1.Rendering && mBot.KeyCount == 4 && !highDensityChart)
-                    StartWorker(() => RenderPlayback(generation), ThreadPriority.BelowNormal);
+                    StartWorker(() => RenderPlayback(generation, runGeneration), ThreadPriority.BelowNormal);
 
                 bool cancelled = false;
                 double lastUiUpdate = -1000.0;
@@ -608,7 +656,13 @@ namespace FNFBot20
                     foreach (ScheduledInputEvent inputEvent in inputSchedule)
                     {
                         double target = inputEvent.Time - kBot.offset;
-                        if (!PrecisionWaitUntil(target, generation, ref lastUiUpdate))
+                        if (!PrecisionWaitUntil(target, generation, runGeneration, ref lastUiUpdate))
+                        {
+                            cancelled = true;
+                            break;
+                        }
+
+                        if (runGeneration != Volatile.Read(ref playbackRunGeneration))
                         {
                             cancelled = true;
                             break;
@@ -634,6 +688,9 @@ namespace FNFBot20
                     break;
 
                 ReleaseAllKeys();
+
+                if (runGeneration != Volatile.Read(ref playbackRunGeneration))
+                    continue;
 
                 if (!Playing || cancelled)
                 {
@@ -734,7 +791,9 @@ namespace FNFBot20
             shutdownRequested = true;
             SongLoaded = false;
             Playing = false;
+            Interlocked.Increment(ref playbackRunGeneration);
             Interlocked.Increment(ref playbackGeneration);
+            playbackStartSignal.Set();
 
             try
             {
