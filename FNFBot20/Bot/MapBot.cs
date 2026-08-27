@@ -257,8 +257,6 @@ namespace FNFBot20
 
             foreach (FNFSong.FNFNote n in sect.Notes)
             {
-                n.Time = Math.Round(n.Time);
-
                 int rawType = (int)n.Type;
                 if (rawType < 0 || rawType >= KeyCount * 2)
                     continue;

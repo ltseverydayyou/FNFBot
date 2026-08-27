@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using WindowsInput.Native;
 using FridayNightFunkin;
@@ -27,7 +28,31 @@ namespace FNFBot20
         private readonly Dictionary<VirtualKeyCode, int> heldKeys = new Dictionary<VirtualKeyCode, int>();
         private volatile bool shutdownRequested;
         private int playbackGeneration;
-        private int notesPlayed;
+        private readonly List<ScheduledInputEvent> inputSchedule = new List<ScheduledInputEvent>();
+        private bool highDensityChart;
+        private int peakNotesPerSecond;
+        private double minimumLaneGapMs = double.PositiveInfinity;
+        private int maximumSectionHitNotes;
+
+        [DllImport("winmm.dll")]
+        private static extern uint timeBeginPeriod(uint uPeriod);
+
+        [DllImport("winmm.dll")]
+        private static extern uint timeEndPeriod(uint uPeriod);
+
+        private sealed class ScheduledNote
+        {
+            public double Time;
+            public double Length;
+            public int Lane;
+        }
+
+        private sealed class ScheduledInputEvent
+        {
+            public double Time;
+            public int Lane;
+            public bool IsDown;
+        }
 
         private static readonly Dictionary<int, int[]> DefaultLaneLayouts = new Dictionary<int, int[]>
         {
@@ -188,12 +213,13 @@ namespace FNFBot20
             }
         }
 
-        private Thread StartWorker(ThreadStart work)
+        private Thread StartWorker(ThreadStart work, ThreadPriority priority = ThreadPriority.Normal)
         {
             var thread = new Thread(() =>
             {
                 try
                 {
+                    Thread.CurrentThread.Priority = priority;
                     work();
                 }
                 catch (ThreadInterruptedException)
@@ -211,6 +237,7 @@ namespace FNFBot20
             });
 
             thread.IsBackground = true;
+            thread.Priority = priority;
 
             lock (threadLock)
                 workerThreads.Add(thread);
@@ -283,6 +310,111 @@ namespace FNFBot20
             ReleaseAllKeys();
         }
 
+        private int BuildInputSchedule()
+        {
+            inputSchedule.Clear();
+            var notes = new List<ScheduledNote>();
+            maximumSectionHitNotes = 0;
+
+            foreach (FNFSong.FNFSection section in mBot.song.Sections)
+            {
+                List<FNFSong.FNFNote> sectionNotes = mBot.GetHitNotes(section);
+                if (sectionNotes.Count > maximumSectionHitNotes)
+                    maximumSectionHitNotes = sectionNotes.Count;
+
+                foreach (FNFSong.FNFNote note in sectionNotes)
+                {
+                    int lane = mBot.GetLane(note);
+                    if (lane < 0 || lane >= mBot.KeyCount)
+                        continue;
+
+                    notes.Add(new ScheduledNote
+                    {
+                        Time = (double)note.Time,
+                        Length = (double)note.Length,
+                        Lane = lane
+                    });
+                }
+            }
+
+            notes.Sort((a, b) => a.Time.CompareTo(b.Time));
+
+            peakNotesPerSecond = 0;
+            int windowStart = 0;
+            for (int i = 0; i < notes.Count; i++)
+            {
+                while (windowStart < i && notes[i].Time - notes[windowStart].Time >= 1000.0)
+                    windowStart++;
+
+                int count = i - windowStart + 1;
+                if (count > peakNotesPerSecond)
+                    peakNotesPerSecond = count;
+            }
+
+            minimumLaneGapMs = double.PositiveInfinity;
+            var nextLaneTime = new Dictionary<ScheduledNote, double>();
+            for (int lane = 0; lane < mBot.KeyCount; lane++)
+            {
+                List<ScheduledNote> laneNotes = notes.Where(n => n.Lane == lane).OrderBy(n => n.Time).ToList();
+                for (int i = 0; i < laneNotes.Count; i++)
+                {
+                    double nextTime = i + 1 < laneNotes.Count ? laneNotes[i + 1].Time : double.PositiveInfinity;
+                    nextLaneTime[laneNotes[i]] = nextTime;
+
+                    if (!double.IsPositiveInfinity(nextTime))
+                    {
+                        double gap = nextTime - laneNotes[i].Time;
+                        if (gap > 0.0001 && gap < minimumLaneGapMs)
+                            minimumLaneGapMs = gap;
+                    }
+                }
+            }
+
+            highDensityChart = peakNotesPerSecond >= 24 ||
+                               minimumLaneGapMs < 35.0 ||
+                               maximumSectionHitNotes >= 32;
+
+            foreach (ScheduledNote note in notes)
+            {
+                double nextTime = nextLaneTime[note];
+                double nextGap = double.IsPositiveInfinity(nextTime)
+                    ? double.PositiveInfinity
+                    : nextTime - note.Time;
+
+                double duration;
+                if (note.Length > 0)
+                {
+                    duration = Math.Max(1.0, note.Length);
+                }
+                else if (!double.IsPositiveInfinity(nextGap) && nextGap > 0.0)
+                {
+                    if (nextGap <= 5.0)
+                        duration = Math.Max(1.0, nextGap * 0.45);
+                    else
+                        duration = Math.Min(18.0, Math.Max(4.0, nextGap - 5.0));
+                }
+                else
+                {
+                    duration = 18.0;
+                }
+
+                inputSchedule.Add(new ScheduledInputEvent { Time = note.Time, Lane = note.Lane, IsDown = true });
+                inputSchedule.Add(new ScheduledInputEvent { Time = note.Time + duration, Lane = note.Lane, IsDown = false });
+            }
+
+            inputSchedule.Sort((a, b) =>
+            {
+                int byTime = a.Time.CompareTo(b.Time);
+                if (byTime != 0)
+                    return byTime;
+                if (a.IsDown == b.IsDown)
+                    return 0;
+                return a.IsDown ? 1 : -1;
+            });
+
+            return notes.Count;
+        }
+
         public void Load(string songDirectory)
         {
             SafeConsole("attempting to load " + songDirectory);
@@ -310,9 +442,7 @@ namespace FNFBot20
                 return;
             }
 
-            int hitCount = 0;
-            foreach (var sect in mBot.song.Sections)
-                hitCount += mBot.GetHitNotes(sect).Count;
+            int hitCount = BuildInputSchedule();
 
             SongLoaded = hitCount > 0;
             if (!SongLoaded)
@@ -320,14 +450,23 @@ namespace FNFBot20
 
             watch = new Stopwatch();
             int generation = Volatile.Read(ref playbackGeneration);
-            currentPlayThread = StartWorker(() => PlayThread(generation));
+            currentPlayThread = StartWorker(() => PlayThread(generation), ThreadPriority.Highest);
+
+            string laneGapText = double.IsPositiveInfinity(minimumLaneGapMs)
+                ? "n/a"
+                : minimumLaneGapMs.ToString("0.###") + " ms";
 
             SafeConsole(
                 "Loaded " + mBot.song.SongName +
                 " as " + mBot.KeyCount + "K with " +
                 mBot.song.Sections.Count + " sections and " +
-                hitCount + " hittable notes."
+                hitCount + " hittable notes. Peak density: " + peakNotesPerSecond +
+                " notes/sec; fastest lane gap: " + laneGapText +
+                "; max section notes: " + maximumSectionHitNotes + "."
             );
+
+            if (highDensityChart)
+                SafeConsole("High-density timing mode enabled: adaptive key pulses + precision scheduler. Note preview is suppressed during playback to protect timing.");
 
             if (Form1.offset != null)
                 Form1.offset.Text = "Offset: " + kBot.offset;
@@ -335,87 +474,128 @@ namespace FNFBot20
                 Form1.watchTime.Text = "Time: 00:00:000";
         }
 
+        private bool PrecisionWaitUntil(double targetMilliseconds, int generation, ref double lastUiUpdate)
+        {
+            while (IsSessionCurrent(generation) && Playing)
+            {
+                double elapsed = watch.Elapsed.TotalMilliseconds;
+                double remaining = targetMilliseconds - elapsed;
+                if (remaining <= 0)
+                    return true;
+
+                if (elapsed - lastUiUpdate >= 33.0)
+                {
+                    lastUiUpdate = elapsed;
+                    if (Form1.watchTime != null)
+                        Form1.watchTime.Text = "Time: " + FormatTime(watch.Elapsed);
+                }
+
+                if (remaining > 8.0)
+                {
+                    int sleepMs = Math.Max(1, (int)Math.Floor(remaining - 3.0));
+                    Thread.Sleep(sleepMs);
+                }
+                else if (remaining > 2.0)
+                {
+                    Thread.Sleep(1);
+                }
+                else if (remaining > 0.5)
+                {
+                    Thread.Yield();
+                }
+                else
+                {
+                    Thread.SpinWait(80);
+                }
+            }
+
+            return false;
+        }
+
+        private void RenderPlayback(int generation)
+        {
+            foreach (FNFSong.FNFSection section in mBot.song.Sections)
+            {
+                if (!IsSessionCurrent(generation) || !Playing)
+                    return;
+
+                List<FNFSong.FNFNote> notes = mBot.GetHitNotes(section);
+                if (notes.Count == 0)
+                    continue;
+
+                double target = (double)notes.Min(n => n.Time) - kBot.offset;
+                while (IsSessionCurrent(generation) && Playing && watch.Elapsed.TotalMilliseconds < target)
+                    Thread.Sleep(5);
+
+                if (!IsSessionCurrent(generation) || !Playing)
+                    return;
+
+                rBot.ListNotes(notes);
+            }
+        }
+
         private void PlayThread(int generation)
         {
-            SafeConsole("Play Thread created...");
+            SafeConsole("Precision play scheduler created...");
 
             while (IsSessionCurrent(generation))
             {
                 if (!Playing)
                 {
-                    Thread.Sleep(50);
+                    Thread.Sleep(25);
                     continue;
                 }
 
-                if (!watch.IsRunning)
-                {
-                    if (Form1.watchTime != null)
-                        Form1.watchTime.Text = "Time: 00:00:000";
-                    watch.Reset();
-                    watch.Start();
-                }
+                ReleaseAllKeys();
+                watch.Reset();
+                watch.Start();
 
-                int sectionSee = 0;
+                if (Form1.watchTime != null)
+                    Form1.watchTime.Text = "Time: 00:00:000";
+
+                if (Form1.Rendering && mBot.KeyCount == 4 && !highDensityChart)
+                    StartWorker(() => RenderPlayback(generation), ThreadPriority.BelowNormal);
+
                 bool cancelled = false;
+                double lastUiUpdate = -1000.0;
+                double worstLateness = 0.0;
+                int[] playbackLayout = GetLaneLayout(mBot.KeyCount);
+                timeBeginPeriod(1);
 
-                foreach (FNFSong.FNFSection sect in mBot.song.Sections)
+                try
                 {
-                    if (!Playing || !IsSessionCurrent(generation))
+                    foreach (ScheduledInputEvent inputEvent in inputSchedule)
                     {
-                        cancelled = true;
-                        break;
-                    }
-
-                    sectionSee++;
-                    List<FNFSong.FNFNote> notesToPlay = mBot.GetHitNotes(sect);
-                    Interlocked.Exchange(ref notesPlayed, 0);
-
-                    foreach (FNFSong.FNFNote note in notesToPlay)
-                    {
-                        FNFSong.FNFNote capturedNote = note;
-                        StartWorker(() => HandleNote(capturedNote, generation));
-                    }
-
-                    if (Form1.Rendering && mBot.KeyCount == 4)
-                    {
-                        List<FNFSong.FNFNote> capturedNotes = notesToPlay;
-                        StartWorker(() =>
-                        {
-                            if (IsSessionCurrent(generation))
-                                rBot.ListNotes(capturedNotes);
-                        });
-                    }
-
-                    while (Volatile.Read(ref notesPlayed) < notesToPlay.Count && sectionSee == Form1.SectionSee)
-                    {
-                        if (!Playing || !IsSessionCurrent(generation))
+                        double target = inputEvent.Time - kBot.offset;
+                        if (!PrecisionWaitUntil(target, generation, ref lastUiUpdate))
                         {
                             cancelled = true;
                             break;
                         }
 
-                        if (watch.IsRunning && Form1.watchTime != null)
-                            Form1.watchTime.Text = "Time: " + FormatTime(watch.Elapsed);
+                        double lateness = watch.Elapsed.TotalMilliseconds - target;
+                        if (lateness > worstLateness)
+                            worstLateness = lateness;
 
-                        Thread.Sleep(1);
+                        VirtualKeyCode key = (VirtualKeyCode)playbackLayout[inputEvent.Lane];
+                        if (inputEvent.IsDown)
+                            AcquireKey(key);
+                        else
+                            ReleaseKey(key);
                     }
-
-                    if (cancelled)
-                        break;
-
-                    if (sectionSee == Form1.SectionSee)
-                    {
-                        Interlocked.Exchange(ref notesPlayed, 0);
-                        sectionSee = 0;
-                    }
+                }
+                finally
+                {
+                    timeEndPeriod(1);
                 }
 
                 if (!IsSessionCurrent(generation))
                     break;
 
+                ReleaseAllKeys();
+
                 if (!Playing || cancelled)
                 {
-                    ReleaseAllKeys();
                     watch.Reset();
                     if (Form1.watchTime != null)
                         Form1.watchTime.Text = "Time: 00:00:000";
@@ -423,18 +603,12 @@ namespace FNFBot20
                 }
 
                 Playing = false;
-                if (watch.IsRunning)
-                {
-                    watch.Stop();
-                    if (Form1.watchTime != null)
-                        Form1.watchTime.Text = "Time: " + FormatTime(watch.Elapsed);
-                }
-
-                ReleaseAllKeys();
-                SafeConsole("Completed!");
+                watch.Stop();
+                if (Form1.watchTime != null)
+                    Form1.watchTime.Text = "Time: " + FormatTime(watch.Elapsed);
+                SafeConsole("Completed! Scheduler worst lateness: " + worstLateness.ToString("0.00") + " ms.");
             }
         }
-
         private VirtualKeyCode GetLaneKey(int keyCount, int lane)
         {
             int[] layout;
@@ -452,7 +626,14 @@ namespace FNFBot20
                 heldKeys.TryGetValue(key, out count);
 
                 if (count == 0)
+                {
                     kBot.KeyDown((int)key);
+                }
+                else
+                {
+                    kBot.KeyUp((int)key);
+                    kBot.KeyDown((int)key);
+                }
 
                 heldKeys[key] = count + 1;
                 return true;
@@ -501,57 +682,6 @@ namespace FNFBot20
                 }
 
                 heldKeys.Clear();
-            }
-        }
-
-        private bool WaitUntil(double targetMilliseconds, int generation)
-        {
-            while (IsSessionCurrent(generation) && Playing && watch.Elapsed.TotalMilliseconds < targetMilliseconds)
-                Thread.Sleep(1);
-
-            return IsSessionCurrent(generation) && Playing;
-        }
-
-        private void SleepWhileActive(int milliseconds, int generation)
-        {
-            if (milliseconds <= 0)
-                return;
-
-            Stopwatch holdWatch = Stopwatch.StartNew();
-            while (holdWatch.ElapsedMilliseconds < milliseconds && IsSessionCurrent(generation) && Playing)
-            {
-                int remaining = milliseconds - (int)holdWatch.ElapsedMilliseconds;
-                Thread.Sleep(Math.Max(1, Math.Min(5, remaining)));
-            }
-        }
-
-        public void HandleNote(FNFSong.FNFNote note, int generation)
-        {
-            VirtualKeyCode key = 0;
-            bool acquired = false;
-
-            try
-            {
-                double target = (double)note.Time - kBot.offset;
-                if (!WaitUntil(target, generation))
-                    return;
-
-                int lane = mBot.GetLane(note);
-                key = GetLaneKey(mBot.KeyCount, lane);
-                acquired = AcquireKey(key);
-
-                int holdMilliseconds = note.Length > 0
-                    ? Math.Max(1, Convert.ToInt32(note.Length))
-                    : 25;
-
-                SleepWhileActive(holdMilliseconds, generation);
-            }
-            finally
-            {
-                if (acquired)
-                    ReleaseKey(key);
-
-                Interlocked.Increment(ref notesPlayed);
             }
         }
 
