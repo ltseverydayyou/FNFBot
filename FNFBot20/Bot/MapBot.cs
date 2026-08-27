@@ -35,6 +35,53 @@ namespace FNFBot20
             return int.TryParse(token.ToString(), out value);
         }
 
+        private int InferKeyCountFromNotes(JObject songObj)
+        {
+            if (songObj == null)
+                return 0;
+
+            JArray notesArr = songObj["notes"] as JArray;
+            if (notesArr == null)
+                return 0;
+
+            int maxRaw = -1;
+
+            foreach (var sectToken in notesArr)
+            {
+                JObject sectObj = sectToken as JObject;
+                if (sectObj == null)
+                    continue;
+
+                JArray sectionNotes = sectObj["sectionNotes"] as JArray;
+                if (sectionNotes == null)
+                    continue;
+
+                foreach (var noteToken in sectionNotes)
+                {
+                    JArray arr = noteToken as JArray;
+                    if (arr == null || arr.Count < 2)
+                        continue;
+
+                    int raw;
+                    if (TryReadInt(arr[1], out raw) && raw >= 0 && raw > maxRaw)
+                        maxRaw = raw;
+                }
+            }
+
+            if (maxRaw < 1)
+                return 0;
+
+            int totalRawLanes = maxRaw + 1;
+            if ((totalRawLanes % 2) != 0)
+                return 0;
+
+            int inferred = totalRawLanes / 2;
+            if (inferred < 1 || inferred > 18)
+                return 0;
+
+            return inferred;
+        }
+
         private void DetectKeyCount(JObject root, JObject songObj)
         {
             int value;
@@ -55,23 +102,38 @@ namespace FNFBot20
                 {
                     KeyCount = Math.Max(1, Math.Min(18, value));
                     Mania = KeyCount - 1;
-                    Form1.WriteToConsole("Detected " + KeyCount + "K chart.");
+                    Form1.WriteToConsole("Detected " + KeyCount + "K chart from " + name + ".");
                     return;
                 }
             }
 
-            if ((songObj != null && TryReadInt(songObj["mania"], out value)) ||
-                TryReadInt(root["mania"], out value))
+            int inferredKeyCount = InferKeyCountFromNotes(songObj);
+            int maniaValue;
+            bool hasMania = (songObj != null && TryReadInt(songObj["mania"], out maniaValue)) ||
+                            TryReadInt(root["mania"], out maniaValue);
+
+            if (inferredKeyCount > 0)
             {
-                Mania = value;
-                KeyCount = Math.Max(1, Math.Min(18, value + 1));
-                Form1.WriteToConsole("Detected " + KeyCount + "K chart (mania " + value + ").");
+                KeyCount = inferredKeyCount;
+                Mania = hasMania ? maniaValue : KeyCount - 1;
+                Form1.WriteToConsole(
+                    "Detected " + KeyCount + "K chart from note lanes" +
+                    (hasMania ? " (mania " + maniaValue + ")." : ".")
+                );
+                return;
+            }
+
+            if (hasMania)
+            {
+                Mania = maniaValue;
+                KeyCount = Math.Max(1, Math.Min(18, maniaValue + 1));
+                Form1.WriteToConsole("Detected " + KeyCount + "K chart from mania " + maniaValue + ".");
                 return;
             }
 
             KeyCount = 4;
             Mania = 3;
-            Form1.WriteToConsole("No mania/key-count field found; using 4K.");
+            Form1.WriteToConsole("No key-count information found; using 4K.");
         }
 
         private string FixChart(string path)

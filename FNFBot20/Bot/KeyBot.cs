@@ -219,14 +219,59 @@ namespace FNFBot20
         [DllImport("user32.dll", SetLastError = true)]
         static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
 
+        [DllImport("user32.dll")]
+        static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
         public const int KEYEVENTF_EXTENDEDKEY = 0x0001;
         public const int KEYEVENTF_KEYUP = 0x0002;
 
+        private static bool IsExtendedVirtualKey(int virtualKey)
+        {
+            switch ((Keys)virtualKey)
+            {
+                case Keys.Left:
+                case Keys.Right:
+                case Keys.Up:
+                case Keys.Down:
+                case Keys.Insert:
+                case Keys.Delete:
+                case Keys.Home:
+                case Keys.End:
+                case Keys.PageUp:
+                case Keys.PageDown:
+                case Keys.RControlKey:
+                case Keys.RMenu:
+                case Keys.NumLock:
+                case Keys.Divide:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        public void KeyDown(int virtualKey)
+        {
+            byte key = unchecked((byte)virtualKey);
+            byte scan = unchecked((byte)MapVirtualKey((uint)key, 0));
+            int flags = IsExtendedVirtualKey(virtualKey) ? KEYEVENTF_EXTENDEDKEY : 0;
+            keybd_event(key, scan, flags, 0);
+        }
+
+        public void KeyUp(int virtualKey)
+        {
+            byte key = unchecked((byte)virtualKey);
+            byte scan = unchecked((byte)MapVirtualKey((uint)key, 0));
+            int flags = KEYEVENTF_KEYUP;
+            if (IsExtendedVirtualKey(virtualKey))
+                flags |= KEYEVENTF_EXTENDEDKEY;
+            keybd_event(key, scan, flags, 0);
+        }
+
         public void KeyPress(byte key, byte scan)
         {
-            keybd_event(key, scan, KEYEVENTF_EXTENDEDKEY, 0);
+            KeyDown(key);
             Thread.Sleep(25);
-            keybd_event(key, scan, KEYEVENTF_KEYUP, 0);
+            KeyUp(key);
         }
     }
 

@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
-using WindowsInput;
 using WindowsInput.Native;
 using FridayNightFunkin;
 
@@ -20,7 +19,6 @@ namespace FNFBot20
         public MapBot mBot;
         public RenderBot rBot;
 
-        public InputSimulator simulator = new InputSimulator();
         public Thread currentPlayThread { get; set; }
 
         private readonly object threadLock = new object();
@@ -454,7 +452,7 @@ namespace FNFBot20
                 heldKeys.TryGetValue(key, out count);
 
                 if (count == 0)
-                    simulator.Keyboard.KeyDown(key);
+                    kBot.KeyDown((int)key);
 
                 heldKeys[key] = count + 1;
                 return true;
@@ -473,7 +471,7 @@ namespace FNFBot20
                 {
                     try
                     {
-                        simulator.Keyboard.KeyUp(key);
+                        kBot.KeyUp((int)key);
                     }
                     finally
                     {
@@ -495,7 +493,7 @@ namespace FNFBot20
                 {
                     try
                     {
-                        simulator.Keyboard.KeyUp(key);
+                        kBot.KeyUp((int)key);
                     }
                     catch
                     {
