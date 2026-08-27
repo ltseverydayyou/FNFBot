@@ -14,7 +14,8 @@ namespace FNFBot20
             None,
             Play,
             OffsetUp,
-            OffsetDown
+            OffsetDown,
+            Lane
         }
 
         public LowLevelKeyboardHook kHook { get; set; }
@@ -25,9 +26,12 @@ namespace FNFBot20
         public Keys OffsetUpKey = Keys.F2;
         public Keys OffsetDownKey = Keys.F3;
 
-        const string KeybindFile = "keybinds.settings";
+        static readonly string KeybindFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "keybinds.settings");
+        static readonly string OffsetFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bot.settings");
 
         public BindTarget CurrentBindTarget = BindTarget.None;
+        public int CurrentLaneKeyCount { get; private set; }
+        public int CurrentLaneIndex { get; private set; } = -1;
 
         public int DefaultOffset { get; private set; }
 
@@ -36,10 +40,10 @@ namespace FNFBot20
             kHook = new LowLevelKeyboardHook();
             try
             {
-                if (!File.Exists("bot.settings"))
-                    File.WriteAllText("bot.settings", offset.ToString());
+                if (!File.Exists(OffsetFile))
+                    File.WriteAllText(OffsetFile, offset.ToString());
                 else
-                    offset = Convert.ToInt32(File.ReadAllText("bot.settings"));
+                    offset = Convert.ToInt32(File.ReadAllText(OffsetFile));
             }
             catch
             {
@@ -94,10 +98,29 @@ namespace FNFBot20
             File.WriteAllLines(KeybindFile, lines);
         }
 
+        public void ResetKeybinds()
+        {
+            PlayKey = Keys.F1;
+            OffsetUpKey = Keys.F2;
+            OffsetDownKey = Keys.F3;
+            CurrentBindTarget = BindTarget.None;
+            CurrentLaneIndex = -1;
+            SaveKeybinds();
+        }
+
         public void BeginBind(BindTarget target)
         {
+            CurrentLaneIndex = -1;
             CurrentBindTarget = target;
             Form1.WriteToConsole("Press a key to bind " + target + ".");
+        }
+
+        public void BeginLaneBind(int keyCount, int laneIndex)
+        {
+            CurrentLaneKeyCount = keyCount;
+            CurrentLaneIndex = laneIndex;
+            CurrentBindTarget = BindTarget.Lane;
+            Form1.WriteToConsole("Press a key for " + keyCount + "K lane " + (laneIndex + 1) + ".");
         }
 
         public void ResetOffset()
@@ -105,7 +128,7 @@ namespace FNFBot20
             offset = DefaultOffset;
             try
             {
-                File.WriteAllText("bot.settings", offset.ToString());
+                File.WriteAllText(OffsetFile, offset.ToString());
             }
             catch
             {
@@ -122,7 +145,23 @@ namespace FNFBot20
             {
                 if (CurrentBindTarget != BindTarget.None)
                 {
-                    switch (CurrentBindTarget)
+                    BindTarget target = CurrentBindTarget;
+                    CurrentBindTarget = BindTarget.None;
+
+                    if (target == BindTarget.Lane)
+                    {
+                        if (Form1.Instance != null && Form1.Instance.bot != null)
+                        {
+                            Form1.Instance.bot.SetLaneKey(CurrentLaneKeyCount, CurrentLaneIndex, keys);
+                            Form1.Instance.RefreshLaneKeyButtons();
+                        }
+
+                        Form1.WriteToConsole("Bound " + CurrentLaneKeyCount + "K lane " + (CurrentLaneIndex + 1) + " to " + keys + ".");
+                        CurrentLaneIndex = -1;
+                        return;
+                    }
+
+                    switch (target)
                     {
                         case BindTarget.Play:
                             PlayKey = keys;
@@ -136,7 +175,6 @@ namespace FNFBot20
                     }
 
                     SaveKeybinds();
-                    CurrentBindTarget = BindTarget.None;
                     if (Form1.Instance != null)
                         Form1.Instance.UpdateKeybindLabels();
                     Form1.WriteToConsole("Bound " + keys + ".");

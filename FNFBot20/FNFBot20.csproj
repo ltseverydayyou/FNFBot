@@ -113,6 +113,7 @@
     <Compile Include="Bot\KeyBot.cs" />
     <Compile Include="Bot\MapBot.cs" />
     <Compile Include="Bot\RenderBot.cs" />
+    <Compile Include="UiControls.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
     </Compile>

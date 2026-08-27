@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows.Forms;
@@ -11,11 +11,67 @@ namespace FNFBot20
     public class MapBot
     {
         public FNFSong song { get; set; }
+        public int KeyCount { get; private set; } = 4;
+        public int Mania { get; private set; } = 3;
 
         public MapBot(string songDir)
         {
             string fixedPath = FixChart(songDir);
             song = new FNFSong(fixedPath);
+        }
+
+        private static bool TryReadInt(JToken token, out int value)
+        {
+            value = 0;
+            if (token == null)
+                return false;
+
+            if (token.Type == JTokenType.Integer)
+            {
+                value = token.Value<int>();
+                return true;
+            }
+
+            return int.TryParse(token.ToString(), out value);
+        }
+
+        private void DetectKeyCount(JObject root, JObject songObj)
+        {
+            int value;
+
+            string[] explicitCountNames =
+            {
+                "keyCount",
+                "keys",
+                "playerKeyCount",
+                "laneCount",
+                "lanes"
+            };
+
+            foreach (string name in explicitCountNames)
+            {
+                if ((songObj != null && TryReadInt(songObj[name], out value)) ||
+                    TryReadInt(root[name], out value))
+                {
+                    KeyCount = Math.Max(1, Math.Min(18, value));
+                    Mania = KeyCount - 1;
+                    Form1.WriteToConsole("Detected " + KeyCount + "K chart.");
+                    return;
+                }
+            }
+
+            if ((songObj != null && TryReadInt(songObj["mania"], out value)) ||
+                TryReadInt(root["mania"], out value))
+            {
+                Mania = value;
+                KeyCount = Math.Max(1, Math.Min(18, value + 1));
+                Form1.WriteToConsole("Detected " + KeyCount + "K chart (mania " + value + ").");
+                return;
+            }
+
+            KeyCount = 4;
+            Mania = 3;
+            Form1.WriteToConsole("No mania/key-count field found; using 4K.");
         }
 
         private string FixChart(string path)
@@ -40,9 +96,11 @@ namespace FNFBot20
                 return path;
             }
 
+            JObject songObj = root["song"] as JObject;
+            DetectKeyCount(root, songObj);
+
             var noteTypeDecisions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-            JObject songObj = root["song"] as JObject;
             if (songObj != null)
             {
                 JArray notesArr = songObj["notes"] as JArray;
@@ -51,17 +109,20 @@ namespace FNFBot20
                     foreach (var sectToken in notesArr)
                     {
                         JObject sectObj = sectToken as JObject;
-                        if (sectObj == null) continue;
+                        if (sectObj == null)
+                            continue;
 
                         JArray sectionNotes = sectObj["sectionNotes"] as JArray;
-                        if (sectionNotes == null) continue;
+                        if (sectionNotes == null)
+                            continue;
 
                         var toRemove = new List<JToken>();
 
                         foreach (var noteToken in sectionNotes)
                         {
                             JArray arr = noteToken as JArray;
-                            if (arr == null || arr.Count == 0) continue;
+                            if (arr == null || arr.Count == 0)
+                                continue;
 
                             string typeName = null;
                             if (arr.Count > 3)
@@ -89,7 +150,7 @@ namespace FNFBot20
                                         MessageBoxIcon.Question
                                     );
 
-                                    hitThisType = (result == DialogResult.Yes);
+                                    hitThisType = result == DialogResult.Yes;
                                     noteTypeDecisions[typeName] = hitThisType;
                                 }
 
@@ -112,22 +173,36 @@ namespace FNFBot20
 
             string tempPath = Path.Combine(
                 Path.GetTempPath(),
-                "fnfbot_" + Path.GetFileName(path)
+                "fnfbot_" + Guid.NewGuid().ToString("N") + "_" + Path.GetFileName(path)
             );
 
             File.WriteAllText(tempPath, root.ToString(Formatting.None));
             return tempPath;
         }
 
+        public int GetLane(FNFSong.FNFNote note)
+        {
+            int raw = (int)note.Type;
+            if (raw < 0)
+                return -1;
+
+            return raw % KeyCount;
+        }
+
         public List<FNFSong.FNFNote> GetHitNotes(FNFSong.FNFSection sect)
         {
-            List<FNFSong.FNFNote> notes = new List<FNFSong.FNFNote>();
+            var notes = new List<FNFSong.FNFNote>();
+
             foreach (FNFSong.FNFNote n in sect.Notes)
             {
                 n.Time = Math.Round(n.Time);
-                if (sect.MustHitSection && n.Type < (FNFSong.NoteType)4)
-                    notes.Add(n);
-                else if (n.Type >= (FNFSong.NoteType)4 && !sect.MustHitSection)
+
+                int rawType = (int)n.Type;
+                if (rawType < 0 || rawType >= KeyCount * 2)
+                    continue;
+
+                bool lowSide = rawType < KeyCount;
+                if ((sect.MustHitSection && lowSide) || (!sect.MustHitSection && !lowSide))
                     notes.Add(n);
             }
 
