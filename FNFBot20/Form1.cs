@@ -29,6 +29,8 @@ namespace FNFBot20
         public const int HT_CAPTION = 0x2;
 
         private int navTargetTop;
+        private Label lblPlaySide;
+        private ComboBox cmbPlaySide;
 
         [DllImport("user32.dll")]
         public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
@@ -55,6 +57,7 @@ namespace FNFBot20
             OffsetDownKeyLabel = lblOffsetDownKey;
 
             bot = new Bot();
+            InitializePlaySidePicker();
             UpdateKeybindLabels();
 
             checkBox1.Checked = true;
@@ -67,6 +70,56 @@ namespace FNFBot20
             ShowPage(pnlDashboardPage, navDashboard);
             RefreshLaneKeyButtons();
             UpdateFormRegion();
+        }
+
+        private void InitializePlaySidePicker()
+        {
+            lblPlaySide = new Label
+            {
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                AutoSize = false,
+                Font = new Font("Segoe UI Semibold", 8F),
+                ForeColor = Color.FromArgb(142, 129, 162),
+                Location = new Point(300, 18),
+                Size = new Size(55, 18),
+                Text = "Play side",
+                TextAlign = ContentAlignment.MiddleRight
+            };
+
+            cmbPlaySide = new ComboBox
+            {
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                BackColor = Color.FromArgb(36, 28, 58),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Semibold", 9F),
+                ForeColor = Color.White,
+                Location = new Point(362, 14),
+                Size = new Size(110, 23),
+                TabStop = false
+            };
+
+            cmbPlaySide.Items.Add("Player");
+            cmbPlaySide.Items.Add("Opponent");
+            cmbPlaySide.SelectedIndex = 0;
+            cmbPlaySide.SelectedIndexChanged += cmbPlaySide_SelectedIndexChanged;
+
+            pnlTop.Controls.Add(lblPlaySide);
+            pnlTop.Controls.Add(cmbPlaySide);
+            lblPlaySide.BringToFront();
+            cmbPlaySide.BringToFront();
+        }
+
+        private void cmbPlaySide_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (bot == null || cmbPlaySide == null || cmbPlaySide.SelectedIndex < 0)
+                return;
+
+            bot.SetPlaybackSide(
+                cmbPlaySide.SelectedIndex == 1
+                    ? Bot.PlaybackSide.Opponent
+                    : Bot.PlaybackSide.Player
+            );
         }
 
         public static void WriteToConsole(string text)

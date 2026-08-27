@@ -34,6 +34,14 @@ namespace FNFBot20
         private double minimumLaneGapMs = double.PositiveInfinity;
         private int maximumSectionHitNotes;
 
+        public enum PlaybackSide
+        {
+            Player,
+            Opponent
+        }
+
+        public PlaybackSide Side { get; private set; } = PlaybackSide.Player;
+
         [DllImport("winmm.dll")]
         private static extern uint timeBeginPeriod(uint uPeriod);
 
@@ -318,7 +326,7 @@ namespace FNFBot20
 
             foreach (FNFSong.FNFSection section in mBot.song.Sections)
             {
-                List<FNFSong.FNFNote> sectionNotes = mBot.GetHitNotes(section);
+                List<FNFSong.FNFNote> sectionNotes = mBot.GetHitNotes(section, Side == PlaybackSide.Opponent);
                 if (sectionNotes.Count > maximumSectionHitNotes)
                     maximumSectionHitNotes = sectionNotes.Count;
 
@@ -415,6 +423,39 @@ namespace FNFBot20
             return notes.Count;
         }
 
+        public void SetPlaybackSide(PlaybackSide side)
+        {
+            if (Side == side)
+                return;
+
+            Side = side;
+            SafeConsole("Play side changed to " + Side + ".");
+
+            if (mBot == null)
+                return;
+
+            StopPlaybackWorkers();
+            shutdownRequested = false;
+
+            int hitCount = BuildInputSchedule();
+            SongLoaded = hitCount > 0;
+            watch = new Stopwatch();
+
+            int generation = Volatile.Read(ref playbackGeneration);
+            currentPlayThread = StartWorker(() => PlayThread(generation), ThreadPriority.Highest);
+
+            if (Form1.watchTime != null)
+                Form1.watchTime.Text = "Time: 00:00:000";
+
+            SafeConsole(
+                "Rebuilt " + Side + " side schedule: " + hitCount +
+                " hittable notes, peak density " + peakNotesPerSecond + " notes/sec."
+            );
+
+            if (highDensityChart)
+                SafeConsole("High-density timing mode remains enabled for this side.");
+        }
+
         public void Load(string songDirectory)
         {
             SafeConsole("attempting to load " + songDirectory);
@@ -458,7 +499,7 @@ namespace FNFBot20
 
             SafeConsole(
                 "Loaded " + mBot.song.SongName +
-                " as " + mBot.KeyCount + "K with " +
+                " as " + mBot.KeyCount + "K on " + Side + " side with " +
                 mBot.song.Sections.Count + " sections and " +
                 hitCount + " hittable notes. Peak density: " + peakNotesPerSecond +
                 " notes/sec; fastest lane gap: " + laneGapText +
@@ -519,7 +560,7 @@ namespace FNFBot20
                 if (!IsSessionCurrent(generation) || !Playing)
                     return;
 
-                List<FNFSong.FNFNote> notes = mBot.GetHitNotes(section);
+                List<FNFSong.FNFNote> notes = mBot.GetHitNotes(section, Side == PlaybackSide.Opponent);
                 if (notes.Count == 0)
                     continue;
 

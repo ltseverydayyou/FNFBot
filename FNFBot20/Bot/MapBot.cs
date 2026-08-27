@@ -251,7 +251,7 @@ namespace FNFBot20
             return raw % KeyCount;
         }
 
-        public List<FNFSong.FNFNote> GetHitNotes(FNFSong.FNFSection sect)
+        public List<FNFSong.FNFNote> GetHitNotes(FNFSong.FNFSection sect, bool opponentSide = false)
         {
             var notes = new List<FNFSong.FNFNote>();
 
@@ -262,7 +262,8 @@ namespace FNFBot20
                     continue;
 
                 bool lowSide = rawType < KeyCount;
-                if ((sect.MustHitSection && lowSide) || (!sect.MustHitSection && !lowSide))
+                bool playerNote = (sect.MustHitSection && lowSide) || (!sect.MustHitSection && !lowSide);
+                if (opponentSide ? !playerNote : playerNote)
                     notes.Add(n);
             }
 
